@@ -256,6 +256,23 @@ def _listing(reports: list[Report]) -> str:
     return "\n".join(lines)
 
 
+_UNDO_PHRASES = {
+    "undo", "undo that", "undo it", "undo this", "undo the delete", "undo delete", "undo the deletion",
+    "undo deletion", "restore", "restore them", "restore it", "bring them back", "bring it back",
+}
+
+
+def is_undo(text: str) -> bool:
+    """True only when the whole message is a plain undo request."""
+    t = re.sub(r"[^\w\s]", "", text.lower().replace("'", ""))
+    return re.sub(r"\s+", " ", t).strip() in _UNDO_PHRASES
+
+
+def _last_answer_is_question(history: list) -> bool:
+    """The assistant's last reply ended with a question, so a bare yes/no is probably an answer to it."""
+    return bool(history) and str(history[-1].get("a", "")).rstrip().endswith("?")
+
+
 class ReportManager:
     """Everything 'manage_reports' does. `llm` only turns the user's sentence into a structured command;
     it never sees report contents and never confirms anything."""
@@ -270,6 +287,16 @@ class ReportManager:
             return None
         return classify_reply(text)
 
+    def quick_command(self, user_id: str, conversation_id: str, text: str, history: list) -> Optional[str]:
+        """Messages that never need the LLM. Returns a sentinel for handle(): 'undo' or 'nothing_pending'."""
+        if is_undo(text):
+            return "undo"
+        if (classify_reply(text) is not None
+                and self.store.get_pending(user_id, conversation_id) is None
+                and not _last_answer_is_question(history)):
+            return "nothing_pending"
+        return None
+
     def discard_pending(self, user_id: str, conversation_id: str) -> None:
         if self.store.clear_pending(user_id, conversation_id):
             self.event("delete_discarded", reason="other_message")
@@ -277,6 +304,10 @@ class ReportManager:
     # ------------------------------------------------------------------
     def handle(self, user_id: str, conversation_id: str, question: str, history: list,
                confirm: Optional[str] = None) -> str:
+        if confirm == "undo":
+            return self._undo(user_id)
+        if confirm == "nothing_pending":
+            return MSG_NOTHING_PENDING
         if confirm == "yes":
             return self._confirm(user_id, conversation_id)
         if confirm == "no":

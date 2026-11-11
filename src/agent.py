@@ -152,6 +152,11 @@ class DataAgent:
             if reply:
                 self.tracer.event(tid, "intent", intent="manage_reports", model="deterministic")
                 return {"intent": "manage_reports", "confirm": reply, "attempts": 0}
+            quick_fn = getattr(self._manager, "quick_command", None)
+            quick = quick_fn(s["user_id"], s["conversation_id"], s["question"], s.get("history", [])) if quick_fn else None
+            if quick:  # bare undo / stale yes-no: answered in code, no LLM call
+                self.tracer.event(tid, "intent", intent="manage_reports", model="deterministic")
+                return {"intent": "manage_reports", "confirm": quick, "attempts": 0}
         with self.tracer.span(tid, "route"):
             res = self.llm_fast.generate(prompts.router_prompt(s.get("history", []), s["question"]),
                                          system=prompts.ROUTER_SYSTEM, schema=prompts.RouteDecision,
