@@ -1,0 +1,13 @@
+# Sample access mapping (assumption: thelook has no ownership model).
+# A product is in scope if its brand is listed OR its department is listed.
+# Verify brand spellings with:  SELECT DISTINCT brand FROM `bigquery-public-data.thelook_ecommerce.products`
+users:
+  exec_brands:
+    brands: ["Calvin Klein", "Carhartt", "Levi's"]
+  exec_women:
+    departments: ["Women"]
+  exec_mixed:
+    brands: ["Carhartt"]
+    departments: ["Women"]
+  cdo:
+    unrestricted: true

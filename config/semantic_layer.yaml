@@ -1,0 +1,76 @@
+# Semantic layer: what the LLM is allowed to know about the data.
+# Personal columns (names, email, address, postal code, lat/long) are intentionally absent.
+# Business definitions live here so "revenue" or "churn" mean the same thing in every answer.
+tables:
+  orders:
+    description: One row per customer order (header level).
+    columns:
+      order_id: Primary key.
+      user_id: Customer id (joins to users.id).
+      status: "Processing | Shipped | Complete | Returned | Cancelled."
+      gender: Customer gender (F or M).
+      created_at: Order timestamp.
+      shipped_at: Shipping timestamp.
+      delivered_at: Delivery timestamp.
+      returned_at: Return timestamp.
+      num_of_item: Items in the whole order (may include items outside the viewer's product scope; prefer counting order_items).
+  order_items:
+    description: One row per purchased item. The main fact table for revenue.
+    columns:
+      id: Primary key.
+      order_id: Parent order.
+      user_id: Customer id.
+      product_id: Joins to products.id.
+      status: "Processing | Shipped | Complete | Returned | Cancelled."
+      created_at: Item order timestamp.
+      shipped_at: Shipping timestamp.
+      delivered_at: Delivery timestamp.
+      returned_at: Return timestamp.
+      sale_price: Price paid for the item (USD).
+  products:
+    description: Product catalog.
+    columns:
+      id: Primary key.
+      name: Product name.
+      brand: Brand.
+      category: Product category.
+      department: "Men | Women."
+      cost: Unit cost (USD).
+      retail_price: List price (USD).
+      sku: Stock keeping unit.
+      distribution_center_id: Fulfilment center.
+  users:
+    description: Customer demographics (privacy-safe view, no personal identifiers).
+    columns:
+      id: Primary key (customer id).
+      age: Age in years.
+      gender: F or M.
+      state: State or province.
+      city: City.
+      country: Country.
+      traffic_source: "Acquisition channel (Search, Organic, Facebook, Email, Display)."
+      created_at: Signup timestamp.
+
+definitions:
+  revenue: "SUM(order_items.sale_price) over items whose status NOT IN ('Cancelled','Returned'). Period column: order_items.created_at."
+  profit: "SUM(order_items.sale_price - products.cost) over revenue items (join products on product_id)."
+  average_order_value: "revenue / COUNT(DISTINCT order_id)."
+  return_rate: "Items with status 'Returned' divided by all items, in the same period."
+  active_customer: "A customer (order_items.user_id) with at least one revenue item in the period."
+  churn_rate: "For month M: customers active in M-1 who are NOT active in M, divided by customers active in M-1."
+  spend_per_customer: "revenue / COUNT(DISTINCT user_id) for a segment. 'Underspending' means lower spend per customer than the comparison group."
+  relative_periods: "'Last month', 'this quarter', 'Q1' etc. are anchored on the latest date in the data, (SELECT MAX(created_at) FROM order_items), not CURRENT_DATE()."
+
+sql_rules:
+  - BigQuery Standard SQL. SELECT only, one statement per query.
+  - Reference tables by bare name (orders, order_items, products, users). Never add project or dataset prefixes.
+  - Personal columns do not exist for you. Never select names, emails, addresses, postal codes or coordinates.
+  - Alias any customer identifier as customer_id.
+  - Aggregate in SQL and return at most about 50 rows per query; ORDER BY the metric when ranking.
+  - For why/comparison questions use up to 3 queries, for example the headline metric by segment, a breakdown of drivers (volume, price, mix, returns), and a time trend.
+  - Use SAFE_DIVIDE for ratios and DATE_TRUNC / TIMESTAMP_TRUNC for periods.
+  - Get demographics (state, country, age, traffic_source) by joining users on order_items.user_id = users.id.
+  - "BigQuery date traps: TIMESTAMP_SUB/TIMESTAMP_ADD do NOT support MONTH, QUARTER or YEAR. For month math convert to DATE first, e.g. DATE(created_at) >= DATE_SUB(DATE(anchor_ts), INTERVAL 6 MONTH), and use DATE_TRUNC(DATE(created_at), MONTH) for monthly buckets."
+  - For 'last N months' use whole calendar months ending at the anchor month, and exclude the partial anchor month unless asked.
+  - Prefer simple joins with explicit JOIN ... ON; avoid comma joins.
+  - You only see data for products in the viewer's scope; do not try to work around that.
