@@ -1,6 +1,8 @@
 """Saved-reports library with a two-phase, confirmation-gated delete.
 
 Design rules (requirement 3, "High-Stakes Oversight"):
+  * Delete is a SOFT delete (deleted_at) with an audit-log row, so a mistaken confirmation is recoverable
+    with "undo" for UNDO_WINDOW_S. A production job would purge soft-deleted rows after a retention period.
   * Ownership is enforced in SQL: every read and delete carries `owner = ?`. A user can never see or
     delete another user's report, whatever the LLM or the chat text says.
   * Delete is two-phase. Phase 1 resolves the request to a concrete list of report IDs and stores it as a
@@ -25,6 +27,7 @@ from typing import Any, Callable, Optional
 from . import prompts
 
 PENDING_TTL_S = 300
+UNDO_WINDOW_S = 3600
 MAX_LISTED = 10
 
 SCHEMA = """
@@ -34,7 +37,8 @@ CREATE TABLE IF NOT EXISTS reports (
     conversation_id TEXT NOT NULL,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    deleted_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_reports_owner ON reports(owner, conversation_id);
 CREATE TABLE IF NOT EXISTS pending_deletes (
@@ -44,6 +48,15 @@ CREATE TABLE IF NOT EXISTS pending_deletes (
     description TEXT NOT NULL,
     expires_at REAL NOT NULL,
     PRIMARY KEY (user_id, conversation_id)
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    user_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    report_ids TEXT NOT NULL,
+    undone INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -86,6 +99,14 @@ class ReportStore:
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
         self._clock = clock
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Databases created before soft delete existed get the new column in place."""
+        cols = {r["name"] for r in self._db.execute("PRAGMA table_info(reports)")}
+        if "deleted_at" not in cols:
+            with self._db:
+                self._db.execute("ALTER TABLE reports ADD COLUMN deleted_at REAL")
 
     # ------------------------------------------------------------ reports
     @staticmethod
@@ -100,12 +121,12 @@ class ReportStore:
         return self.get(owner, cur.lastrowid)  # type: ignore[return-value]
 
     def get(self, owner: str, report_id: int) -> Optional[Report]:
-        r = self._db.execute("SELECT * FROM reports WHERE owner = ? AND id = ?", (owner, report_id)).fetchone()
+        r = self._db.execute("SELECT * FROM reports WHERE owner = ? AND id = ? AND deleted_at IS NULL", (owner, report_id)).fetchone()
         return self._row(r) if r else None
 
     def list(self, owner: str, *, conversation_id: Optional[str] = None,
              mention: Optional[str] = None) -> list[Report]:
-        sql, args = "SELECT * FROM reports WHERE owner = ?", [owner]
+        sql, args = "SELECT * FROM reports WHERE owner = ? AND deleted_at IS NULL", [owner]
         if conversation_id is not None:
             sql += " AND conversation_id = ?"
             args.append(conversation_id)
@@ -156,9 +177,37 @@ class ReportStore:
             if self._clock() > p.expires_at:
                 return "expired", 0
             marks = ",".join("?" * len(p.report_ids))
-            cur = self._db.execute(f"DELETE FROM reports WHERE owner = ? AND id IN ({marks})",
-                                   (user_id, *p.report_ids))
+            now = self._clock()
+            cur = self._db.execute(
+                f"UPDATE reports SET deleted_at = ? WHERE owner = ? AND deleted_at IS NULL AND id IN ({marks})",
+                (now, user_id, *p.report_ids))
+            if cur.rowcount:
+                self._db.execute(
+                    "INSERT INTO audit_log (ts, user_id, conversation_id, action, report_ids) VALUES (?,?,?,?,?)",
+                    (now, user_id, conversation_id, "delete", json.dumps(p.report_ids)))
         return "deleted", cur.rowcount
+
+    def undo_last_delete(self, user_id: str) -> tuple[str, int]:
+        """Restore the reports of this user's most recent un-undone deletion, within UNDO_WINDOW_S.
+        Returns (status, restored_count); status is 'restored', 'expired' or 'none'."""
+        with self._db:
+            r = self._db.execute(
+                "SELECT * FROM audit_log WHERE user_id = ? AND action = 'delete' AND undone = 0 "
+                "ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
+            if r is None:
+                return "none", 0
+            if self._clock() > r["ts"] + UNDO_WINDOW_S:
+                return "expired", 0
+            ids = json.loads(r["report_ids"])
+            marks = ",".join("?" * len(ids))
+            cur = self._db.execute(
+                f"UPDATE reports SET deleted_at = NULL WHERE owner = ? AND deleted_at IS NOT NULL AND id IN ({marks})",
+                (user_id, *ids))
+            self._db.execute("UPDATE audit_log SET undone = 1 WHERE id = ?", (r["id"],))
+            self._db.execute(
+                "INSERT INTO audit_log (ts, user_id, conversation_id, action, report_ids, undone) VALUES (?,?,?,?,?,1)",
+                (self._clock(), user_id, r["conversation_id"], "undo", json.dumps(ids)))
+        return "restored", cur.rowcount
 
 
 # ---------------------------------------------------------------------- confirmation parsing
@@ -187,6 +236,8 @@ MSG_CANCELLED = "Okay, nothing was deleted."
 MSG_NOTHING_PENDING = "There is nothing waiting for confirmation."
 MSG_EXPIRED = "That confirmation expired, so nothing was deleted. Ask me again if you still want to delete."
 MSG_NO_MATCH = "I couldn't find any saved reports of yours matching that, so nothing was deleted."
+MSG_NOTHING_TO_UNDO = "There is no recent deletion to undo."
+MSG_UNDO_EXPIRED = "The undo window for your last deletion has passed, so those reports can't be restored here."
 MSG_NEED_MENTION = "Which client, product or keyword should the reports mention?"
 
 
@@ -243,6 +294,8 @@ class ReportManager:
             return self._show(user_id, cmd)
         if cmd.action == "delete":
             return self._propose_delete(user_id, conversation_id, cmd)
+        if cmd.action == "undo":
+            return self._undo(user_id)
         return MSG_HELP if not self.store.get_pending(user_id, conversation_id) else MSG_NOTHING_PENDING
 
     # ------------------------------------------------------------------
@@ -293,4 +346,14 @@ class ReportManager:
             return MSG_EXPIRED
         if status == "none":
             return MSG_NOTHING_PENDING
-        return f"Deleted {_plural(n)}."
+        return (f"Deleted {_plural(n)}. Say \"undo\" within the hour to restore "
+                f"{'it' if n == 1 else 'them'}.")
+
+    def _undo(self, user_id: str) -> str:
+        status, n = self.store.undo_last_delete(user_id)
+        self.event("delete_undone", status=status, count=n)
+        if status == "expired":
+            return MSG_UNDO_EXPIRED
+        if status == "none" or n == 0:
+            return MSG_NOTHING_TO_UNDO
+        return f"Restored {_plural(n)}."

@@ -44,3 +44,17 @@ def test_semantic_layer_never_exposes_personal_columns():
     sem = yaml.safe_load((Path(__file__).parent.parent / "config" / "semantic_layer.yaml").read_text())
     for table, spec in sem["tables"].items():
         assert not (set(spec["columns"]) & BLOCKED_COLUMNS), table
+
+
+def test_small_age_city_groups_are_suppressed():
+    df = pd.DataFrame({"city": ["A", "B", "C"], "customers": [2, 5, 40], "avg_spend": [1.0, 2.0, 3.0]})
+    out, notes = mask_frame(df, "s")
+    assert list(out["city"]) == ["B", "C"] and any("suppressed 1" in n for n in notes)
+
+
+def test_group_size_threshold_is_configurable_and_other_columns_untouched():
+    df = pd.DataFrame({"age": [30, 31], "num_customers": [3, 9], "revenue": [10.0, 20.0]})
+    assert len(mask_frame(df, "s", min_group=2)[0]) == 2
+    assert len(mask_frame(df, "s", min_group=5)[0]) == 1
+    state = pd.DataFrame({"state": ["CA"], "customers": [1]})  # state is not a quasi-identifier
+    assert len(mask_frame(state, "s")[0]) == 1

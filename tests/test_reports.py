@@ -120,7 +120,7 @@ def test_delete_by_mention_requires_confirmation_then_deletes_exactly_the_previe
     out = m.handle("u", "c", "delete all reports mentioning Client X", [])
     assert "Reply **yes**" in out and "Client X churn" in out and store.get("u", a.id)  # nothing deleted yet
     late = store.save("u", "c", "Another Client X report", "b")  # appears after the preview
-    assert m.handle("u", "c", "yes", [], confirm="yes") == "Deleted 1 report."
+    assert m.handle("u", "c", "yes", [], confirm="yes").startswith("Deleted 1 report.")
     assert store.get("u", a.id) is None and store.get("u", keep.id) and store.get("u", late.id)
     assert len(llm.calls) == 1  # the confirmation never reached the LLM
 
@@ -130,7 +130,7 @@ def test_delete_conversation_scope():
     store.save("u", "c1", "one", "b"), store.save("u", "c1", "two", "b")
     other = store.save("u", "c2", "elsewhere", "b")
     m.handle("u", "c1", "delete all the reports we made in this conversation", [])
-    assert m.handle("u", "c1", "yes", [], confirm="yes") == "Deleted 2 reports."
+    assert m.handle("u", "c1", "yes", [], confirm="yes").startswith("Deleted 2 reports.")
     assert store.get("u", other.id) is not None
 
 
@@ -147,7 +147,7 @@ def test_changed_request_replaces_the_pending_action():
     a, b = store.save("u", "c", "alpha", "x"), store.save("u", "c", "beta", "y")
     m.handle("u", "c", "delete alpha reports", [])
     m.handle("u", "c", "actually delete beta reports", [])
-    assert m.handle("u", "c", "yes", [], confirm="yes") == "Deleted 1 report."
+    assert m.handle("u", "c", "yes", [], confirm="yes").startswith("Deleted 1 report.")
     assert store.get("u", a.id) and store.get("u", b.id) is None
 
 
@@ -161,7 +161,7 @@ def test_cross_user_delete_cannot_reach_other_users_reports():
     m, store, _ = manager([cmd(scope="all")])
     mine, theirs = store.save("alice", "c", "mine", "b"), store.save("bob", "c", "theirs", "b")
     m.handle("alice", "c", "delete all reports", [])
-    assert m.handle("alice", "c", "yes", [], confirm="yes") == "Deleted 1 report."
+    assert m.handle("alice", "c", "yes", [], confirm="yes").startswith("Deleted 1 report.")
     assert store.get("bob", theirs.id) is not None and store.get("alice", mine.id) is None
 
 
@@ -189,6 +189,60 @@ def test_show_scrubs_body_and_is_owner_only():
     store.save("alice", "c", "T", "mail a@b.com")
     assert "[redacted]" in m.handle("alice", "c", "show report 1", [])
     assert "couldn't find" in m.handle("bob", "c", "show report 1", [])
+
+
+# ---------------------------------------------------------------- soft delete, audit, undo
+def test_delete_is_soft_audited_and_undoable():
+    store = ReportStore()
+    r = store.save("u", "c", "t", "b")
+    store.begin_delete("u", "c", [r], "x")
+    assert store.confirm_delete("u", "c") == ("deleted", 1)
+    assert store.get("u", r.id) is None and store.list("u") == []  # hidden from the user...
+    row = store._db.execute("SELECT deleted_at FROM reports WHERE id = ?", (r.id,)).fetchone()
+    assert row["deleted_at"] is not None  # ...but still stored
+    assert store._db.execute("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'delete'").fetchone()["n"] == 1
+    assert store.undo_last_delete("u") == ("restored", 1) and store.get("u", r.id) is not None
+    assert store.undo_last_delete("u") == ("none", 0)  # single use
+
+
+def test_undo_window_expires():
+    clock = Clock()
+    store = ReportStore(clock=clock)
+    r = store.save("u", "c", "t", "b")
+    store.begin_delete("u", "c", [r], "x")
+    store.confirm_delete("u", "c")
+    clock.t += 3601
+    assert store.undo_last_delete("u") == ("expired", 0) and store.get("u", r.id) is None
+
+
+def test_undo_cannot_restore_other_users_reports():
+    store = ReportStore()
+    r = store.save("alice", "c", "t", "b")
+    store.begin_delete("alice", "c", [r], "x")
+    store.confirm_delete("alice", "c")
+    assert store.undo_last_delete("bob") == ("none", 0) and store.get("alice", r.id) is None
+
+
+def test_old_database_without_deleted_at_is_migrated(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    db.executescript("CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, "
+                     "conversation_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, "
+                     "created_at REAL NOT NULL); INSERT INTO reports (owner, conversation_id, title, body, "
+                     "created_at) VALUES ('u', 'c', 'old report', 'b', 1);")
+    db.commit()
+    db.close()
+    assert [r.title for r in ReportStore(path).list("u")] == ["old report"]
+
+
+def test_manager_undo_restores_the_last_deletion():
+    m, store, _ = manager([cmd(scope="all"), cmd(action="undo"), cmd(action="undo")])
+    r = store.save("u", "c", "t", "b")
+    m.handle("u", "c", "delete all", [])
+    assert "undo" in m.handle("u", "c", "yes", [], confirm="yes")
+    assert m.handle("u", "c", "undo that", []) == "Restored 1 report." and store.get("u", r.id)
+    assert m.handle("u", "c", "undo again", []) == "There is no recent deletion to undo."
 
 
 # ---------------------------------------------------------------- agent wiring
@@ -226,7 +280,7 @@ def test_report_is_saved_and_deletable_in_the_same_conversation():
     r2 = agent.handle_turn("nike", "delete all the reports we made in this conversation", [], conversation_id="c1")
     assert "Reply **yes**" in r2.answer and len(store.list("nike")) == 1
     r3 = agent.handle_turn("nike", "yes", [], conversation_id="c1")  # no LLM script left: proves no LLM call
-    assert r3.answer == "Deleted 1 report." and store.list("nike") == []
+    assert r3.answer.startswith("Deleted 1 report.") and store.list("nike") == []
 
 
 def test_unrelated_message_cancels_pending_delete():
