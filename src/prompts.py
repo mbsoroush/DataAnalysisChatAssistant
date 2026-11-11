@@ -3,6 +3,7 @@
 The persona (tone) is NOT here: it lives in config/persona.md so non-developers can change it
 without a deploy. Everything the user types is passed as data, never as instructions.
 """
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel
@@ -57,10 +58,43 @@ def router_prompt(history: list[dict], question: str) -> str:
     return f"Recent conversation:\n{fmt_history(history)}\n\nNew user message:\n<<<\n{question}\n>>>\n\nClassify the new message."
 
 
+def _add_months(d: date, n: int) -> date:
+    idx = d.year * 12 + (d.month - 1) + n
+    return date(idx // 12, idx % 12 + 1, 1)
+
+
+def date_context(today: date | None = None) -> str:
+    """Explicit period boundaries computed in code, so the model copies dates instead of doing calendar maths."""
+    t = today or datetime.now(timezone.utc).date()
+    tomorrow = t + timedelta(days=1)
+    month1 = t.replace(day=1)
+    q_start = date(t.year, 3 * ((t.month - 1) // 3) + 1, 1)
+    last_q = _add_months(q_start, -3)
+    last_m = _add_months(month1, -1)
+    six = _add_months(month1, -6)
+    year_start = date(t.year, 1, 1)
+    last_year = date(t.year - 1, 1, 1)
+    return (
+        f"DATE REFERENCE - today is {t.isoformat()} (UTC). Resolve every relative period from the ranges below; "
+        "never use dates from memory.\n"
+        "Ranges are half-open: start inclusive, end exclusive (filter with >= start AND < end).\n"
+        f"- last completed quarter: [{last_q}, {q_start})\n"
+        f"- current quarter so far: [{q_start}, {tomorrow})\n"
+        f"- last completed month: [{last_m}, {month1})\n"
+        f"- last 6 completed months: [{six}, {month1})\n"
+        f"- current month so far: [{month1}, {tomorrow})\n"
+        f"- year to date: [{year_start}, {tomorrow})\n"
+        f"- last calendar year: [{last_year}, {year_start})\n"
+        "State the dates you used in each query's purpose."
+    )
+
+
 def plan_system(schema_text: str) -> str:
     return f"""You are a senior data analyst writing BigQuery SQL for a retail company.
 Write between 1 and 3 queries that together answer the question. Each query has a short purpose.
 Return only the structured output.
+
+{date_context()}
 
 {schema_text}
 
@@ -91,7 +125,7 @@ USER PREFERENCES (apply them): {pref_txt}
 RULES:
 - DATA SCOPE: every figure covers only {scope}. Say "your products" or name the scope; never call it "the business" or "the company".
 - Use ONLY numbers present in the query results. Never invent figures.
-- State the exact period analysed (dates), read from the SQL used.
+- State the exact period analysed (dates), read from the SQL used. SQL ranges end exclusively (< '2026-10-01' covers days up to 2026-09-30): always report the last INCLUDED day, for example 'July 1 to September 30, 2026', never the exclusive end date.
 - Only claim what a query result shows. If no query measured customer counts, do not claim there are more customers. Different metrics are not interchangeable (spend per customer is not average order value).
 - A query that returned no rows only means nothing matched its filters, including filters the SQL itself added. It is not evidence about the business; draw no conclusions from it. Never invent thresholds or "internal" benchmarks.
 - State the definitions you used (for example that revenue excludes cancelled and returned items) in one short line.

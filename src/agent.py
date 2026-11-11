@@ -99,6 +99,9 @@ class DataAgent:
         self._access_cache: dict[str, UserAccess] = {}
         if report_store is not None:
             self._manager = ReportManager(report_store, llm_fast, scrub=lambda t: scan_text(t)[0])
+        from . import llm as _llm_mod, obs as _obs  # route LLM telemetry into the trace file
+        _llm_mod.set_event_hook(
+            lambda name, data: self.tracer.event(_obs.current_trace_id.get() or "-", name, **data))
         self.graph = self._build()
 
     # ---------------------------------------------------------------- helpers
@@ -141,6 +144,8 @@ class DataAgent:
     def n_route(self, s: State) -> dict:
         tid = s["trace_id"]
         if self._manager is not None:
+            # events from the manager (including discard_pending) belong to THIS turn
+            self._manager.event = lambda name, **kw: self.tracer.event(tid, name, **kw)
             # A plain yes/no while a deletion awaits confirmation is handled without the LLM:
             # the model can neither confirm a deletion nor be talked into one, and it works during LLM outages.
             reply = self._manager.pending_reply(s["user_id"], s["conversation_id"], s["question"])
@@ -295,6 +300,8 @@ class DataAgent:
                     prefs: Optional[dict] = None, conversation_id: str = "default") -> TurnResult:
         tid, t0 = new_trace_id(), time.monotonic()
         self.tracer.event(tid, "turn_start", user_id=user_id, question=question[:500])
+        from . import obs as _obs_ctx
+        _obs_ctx.current_trace_id.set(tid)
         final: dict[str, Any]
         try:
             self._access(user_id)  # unknown user -> UnknownUserError (fail closed)

@@ -12,7 +12,11 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from contextvars import ContextVar
 from typing import Optional
+
+# Trace id of the turn being processed; lets LLM telemetry events find their turn.
+current_trace_id: ContextVar[Optional[str]] = ContextVar("current_trace_id", default=None)
 
 
 def new_trace_id() -> str:
