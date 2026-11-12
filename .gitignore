@@ -9,4 +9,3 @@ data/*.sqlite
 logs/
 .DS_Store
 data/
-data/

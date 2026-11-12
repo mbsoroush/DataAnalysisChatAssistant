@@ -1,5 +1,7 @@
 # Assumptions & Design Decisions
 
+The full design is in [ARCHITECTURE.md](ARCHITECTURE.md); this file records the assumptions it rests on.
+
 The brief leaves several points open and invites assumptions. Each is stated here with the reasoning, so it can be challenged or changed without redesigning the system.
 
 ## 1. Dataset facts (verified against `bigquery-public-data.thelook_ecommerce`)
@@ -37,11 +39,11 @@ thelook has no ownership model, so access is defined by configuration:
 | Safe dimensions | state, country, gender, traffic_source, dates | Allowed |
 | Pseudonymous keys | users.id / user_id | Shown only as a salted-hash token (e.g. `cust_9f2a1c`), so "top customers" works without exposing identity |
 
-Defense in depth: (1) schema exposed to the LLM omits blocked columns, (2) SQL validator rejects them, (3) result-frame masking before the LLM sees data, (4) output scanner on the final text (emails, phone patterns, names from the blocked columns).
+Defense in depth: (1) schema exposed to the LLM omits blocked columns, (2) SQL validator rejects them, (3) result-frame masking before the LLM sees data, (4) output scanner on the final text (emails and phone-number patterns; the production design adds Cloud Sensitive Data Protection for names and addresses).
 
 ## 4. Golden Bucket ("Trios")
 
-Marked theoretical in the brief, so a schema is assumed and a small seed set is mocked:
+Marked theoretical in the brief, so this is a **design-only** item: the prototype does not read a golden bucket. The assumed schema is:
 
 ```json
 {"id": "...", "question": "...", "sql": "...", "report": "...",
@@ -66,10 +68,10 @@ Marked theoretical in the brief, so a schema is assumed and a small seed set is 
 
 ## 7. LLM
 
-- Gemini through `google-genai`, behind a thin client (`src/llm.py`) providing retries with backoff, an ordered model-fallback chain, a per-model circuit breaker, structured output and token telemetry.
+- Gemini through `google-genai`, behind a thin client (`src/llm.py`) providing retries with backoff, an ordered model-fallback chain, a shared per-model circuit breaker, per-call timeouts and a total deadline, structured output and token telemetry.
 - Observed in practice: a 503 "high demand" on the first smoke test, which is the reason for the fallback design.
 - Model names are configuration. Primary and fallbacks are chosen from the models the API key can access (`scripts/probe_models.py`).
 
 ## 8. Out of scope for the prototype (covered in the design document)
 
-Email delivery, web search, multi-tenant IAM integration, the real Golden Bucket pipeline, and Vertex AI Vector Search. The tool registry keeps these as plug-ins; chart generation is the one example plugin shipped.
+Email delivery, web search, multi-tenant IAM integration, the real Golden Bucket pipeline, and Vertex AI Vector Search. None of these are implemented in the prototype; `docs/ARCHITECTURE.md` explains how each would plug in (tool registry, confirmation gate for side effects).

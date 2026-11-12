@@ -367,8 +367,8 @@ class ReportManager:
         self.store.begin_delete(user_id, conversation_id, reports, what)
         self.event("delete_proposed", scope=cmd.scope, count=len(reports))
         return (f"I found {_plural(len(reports))} {what}:\n{_listing(reports)}\n\n"
-                f"This can't be undone. Reply **yes** to delete "
-                f"{'it' if len(reports) == 1 else 'them'}, or **no** to cancel.")
+                f"Reply **yes** to delete {'it' if len(reports) == 1 else 'them'}, or **no** to cancel. "
+                f"(You can say \"undo\" for an hour afterwards.)")
 
     def _confirm(self, user_id: str, conversation_id: str) -> str:
         status, n = self.store.confirm_delete(user_id, conversation_id)
