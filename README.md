@@ -73,7 +73,7 @@ Model names and free-tier limits change. The probe shows which models respond re
 **6. Run the tests** (no network or credentials needed)
 
 ```bash
-pytest                               # 131 tests
+python -m pytest                      # 131 tests
 ```
 
 **7. Chat**
