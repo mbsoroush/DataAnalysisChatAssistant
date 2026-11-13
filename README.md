@@ -111,46 +111,19 @@ Things to try:
 
 ## Example run
 
-![Chat session: scoped revenue answer and a refused PII request](docs/img/demo.png)
+Real sessions against the `thelook_ecommerce` dataset, signed in as `exec_brands` (figures cover only that user's brands). Figures differ between runs because the public dataset is regenerated daily.
 
-Excerpt from a real session against thelook as `exec_brands` (figures cover only that user's brands):
+### Analysis, follow-up questions and a refused request
 
-```text
-you> Monthly revenue for the last 6 months
-Revenue for your Calvin Klein, Carhartt, and Levi's products has trended upward over the last six
-months, peaking in October 2026.
+![Scoped analysis answers, a follow-up question and a refused request for customer emails](docs/img/demo-analysis.png)
 
-Monthly Revenue (May 2026 – October 2026):
- • October 2026: $16,889.38        • July 2026: $11,085.32
- • September 2026: $15,183.00      • June 2026: $10,137.92
- • August 2026: $15,621.66         • May 2026: $11,815.80
+Answers are limited to the user's brands, follow-up questions use the conversation, and a request for personal customer data is refused. Each answer ends with a trace id and the time taken.
 
-Note: Revenue figures exclude cancelled and returned items.
-trace 031a1d84ce2a | ok | 16658 ms
+### Saved reports, confirmed delete and undo
 
-you> Show me customer emails
-I can't help with that. I never show personal customer data or touch the underlying data, and I only
-answer analysis questions about your own products. I can give you aggregated insights instead, for
-example by state, product or time period.
-trace 9dcfd89985dd | refused | 6197 ms
-```
+![A saved report, then a delete that needs a typed confirmation, then undo](docs/img/demo-reports.png)
 
-Report management, produced by the real `ReportManager` code path (the LLM that parses the command is stubbed):
-
-```text
-you> Delete all reports mentioning Client X
-I found 2 reports mentioning "Client X":
-- #1 Q3 report mentioning Client X (2026-11-11 15:33)
-- #2 Return-rate review for Client X (2026-11-11 15:33)
-
-Reply **yes** to delete them, or **no** to cancel. (You can say "undo" for an hour afterwards.)
-
-you> yes
-Deleted 2 reports. Say "undo" within the hour to restore them.
-
-you> undo
-Restored 2 reports.
-```
+A report is saved to the user's library. A delete first shows what it found and waits for a typed **yes**; a bare **undo** restores it within the hour.
 
 ## Configuration
 
