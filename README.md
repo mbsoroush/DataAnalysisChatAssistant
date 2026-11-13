@@ -4,6 +4,8 @@ A command-line chat agent that lets non-technical executives ask questions about
 English. It writes and runs BigQuery SQL on `bigquery-public-data.thelook_ecommerce`, protects personal data, scopes every user to
 their own products, manages a saved-reports library with a confirmation-gated delete, and recovers from model and warehouse failures.
 
+> **Background:** this project started from an assignment brief from a company: design and build a data-analysis chat agent over BigQuery's public `thelook_ecommerce` dataset. I'm publishing it as a portfolio project.
+
 * **Design and technical explanation:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (production HLD with diagrams, service choices,
   data flow, error handling, and an explanation of every requirement)
 * **Assumptions:** [docs/assumptions.md](docs/assumptions.md)
