@@ -19,7 +19,7 @@ their own products, manages a saved-reports library with a confirmation-gated de
 | Resilience and graceful errors | Built | Self-correction loop capped at 3 attempts; BigQuery dry run and byte caps; LLM retries, timeouts, deadline, model fallback and circuit breaker |
 | Observability | Built | One JSON event per step, keyed by a trace id; `python -m src.trace_report` for metrics and per-turn timelines |
 | Persona management | Built | `config/persona.md` is re-read on every turn; edit it and the next answer changes, no restart |
-| Golden Bucket, learning loop, QA harness | Design only | Explained in the architecture document, as the brief specifies |
+| Golden Bucket, learning loop, QA harness | Design only | Explained in the architecture document, as the project specification states |
 
 ## Quick start
 
@@ -210,7 +210,7 @@ tests/              131 tests (fake LLM and fake BigQuery; no network needed)
 * **LangGraph** for orchestration: the control flow is known, so an explicit graph gives safety checks the model cannot skip,
   a bounded retry budget and testable nodes. The model layer is a thin `google-genai` wrapper instead of LangChain, so retries,
   failover and telemetry are explicit. Full reasoning in [ARCHITECTURE.md](docs/ARCHITECTURE.md#21-framework-langgraph).
-  *Experience with LangGraph: to be completed by the author.*
+  *About my use of LangGraph: this project is my hands-on work with it (typed state, routing, conditional retry edges, bounded self-correction), built with an AI coding assistant. The explicit graph is what makes the safety checks and the retry budget impossible for the model to skip.*
 * **Safety is enforced in code, not in prompts.** The SQL is parsed and rewritten, results are masked, and confirmation of a
   deletion is matched by code, so a manipulated model still cannot leak data or delete reports.
 * **Models chosen by measurement**, not by name: a probe on the free tier picked `gemini-3.1-flash-lite` (fast) and

@@ -6,7 +6,7 @@ Data-analysis chat assistant for a retail company's non-technical executives, bu
 This document has two halves that are kept honestly separate:
 
 * the **production design** (high-level design, services, data flow), and
-* the **prototype** in this repository, which implements the four requirements the brief asks to be built
+* the **prototype** in this repository, which implements the four requirements the project specification asks to be built
   (safety and PII, high-stakes oversight, resilience, observability) plus persona management.
 
 Setup instructions and an example run are in the [README](../README.md#quick-start). The assumptions this design rests on are in
@@ -30,7 +30,7 @@ Setup instructions and an example run are in the [README](../README.md#quick-sta
 
 | # | Requirement | In the prototype | Where |
 |---|---|---|---|
-| 1 | Hybrid intelligence (Golden Bucket) | **Design only** (the brief marks the bucket theoretical) | [4.1](#41-hybrid-intelligence-the-golden-bucket) |
+| 1 | Hybrid intelligence (Golden Bucket) | **Design only** (the specification marks the bucket theoretical) | [4.1](#41-hybrid-intelligence-the-golden-bucket) |
 | 2 | Safety and PII masking | **Built** | [4.2](#42-safety-and-pii-masking), `src/sql_guard.py`, `src/masking.py`, `src/access.py` |
 | 3 | High-stakes oversight (destructive ops) | **Built** | [4.3](#43-high-stakes-oversight-destructive-operations), `src/reports.py` |
 | 4 | Continuous improvement | **Design only** (the analyst prompt already accepts a `prefs` dict, but nothing populates it) | [4.4](#44-continuous-improvement-the-learning-loop) |
@@ -107,7 +107,7 @@ flowchart TB
 | Identity and scope | Corporate IdP through OIDC (Identity Platform or Workforce Identity Federation) | The user's data scope must come from signed claims, never from chat text | Chat API | Brand and department scope as claims |
 | Agent workflow | LangGraph inside the Cloud Run service | Explicit state machine, deterministic safety nodes, bounded retries | Models, guard, state DB, tools | Per-turn state, checkpointed to Postgres so a turn survives an instance restart |
 | LLMs | Vertex AI (Gemini) | IAM and VPC-SC integration, regional control, quotas and provisioned throughput; the prototype uses the Gemini API with a free key | Agent workflow | Nothing stored by us |
-| Warehouse | BigQuery | Mandated by the brief | SQL guard only | Raw transaction tables |
+| Warehouse | BigQuery | Fixed by the project specification | SQL guard only | Raw transaction tables |
 | State database | Cloud SQL for PostgreSQL (HA, point-in-time recovery) | The delete flow needs real transactions (single-use confirmation); one store also serves preferences, audit and the golden index | Agent workflow, curation jobs | Reports, pending deletes, audit log, preferences, persona versions, checkpoints, golden trio index |
 | Golden Bucket | Cloud Storage | Source of truth for expert trios, versioned and cheap | Curation pipeline | Trios as JSON |
 | Async work | Pub/Sub and Cloud Run workers | Email and chart rendering must not block a chat turn | Tool registry | Job messages |
@@ -161,8 +161,7 @@ Trade-offs accepted: more upfront structure than a prompt-driven agent, and a de
 layer (`src/llm.py`) is deliberately **not** LangChain: it is a thin wrapper around `google-genai`, so retries, fallback,
 timeouts and telemetry are ours and swapping provider is one file.
 
-> **Experience with LangGraph:** *to be completed by the author before submission: how long and in what kind of
-> projects LangGraph has been used, and what this prototype taught.*
+> **About my use of LangGraph:** this project is my hands-on work with it (typed state, routing, conditional retry edges, bounded self-correction), built with an AI coding assistant. What it taught me: an explicit graph makes the safety checks and the retry budget impossible for the model to skip, and each node can be tested in isolation with a fake LLM.
 
 ### 2.2 Models
 
@@ -346,7 +345,7 @@ vector for the analyst model; its lack of tools and the output scanner bound the
 
 ### 4.3 High-stakes oversight: destructive operations
 
-*Built* (`src/reports.py`, `tests/test_reports.py`, `tests/test_quick_commands.py`). The brief asks for a strict confirmation
+*Built* (`src/reports.py`, `tests/test_reports.py`, `tests/test_quick_commands.py`). The specification asks for a strict confirmation
 flow without breaking UX.
 
 * **Two phases.** Phase 1 resolves "delete all reports mentioning Client X" or "delete the reports from this conversation"
@@ -541,7 +540,7 @@ turn against a new prompt version offline.
 
 ## 6. Extensibility: charts, email, web search
 
-The brief asks for easy extension. **In the prototype** a new capability is: (1) add an intent to the router schema and prompt,
+The specification asks for easy extension. **In the prototype** a new capability is: (1) add an intent to the router schema and prompt,
 (2) add a node and an edge in `DataAgent._build`, (3) add tests. That is deliberately small, but it is not a plugin system.
 
 **Production design: a tool registry.** Each tool is a declaration:

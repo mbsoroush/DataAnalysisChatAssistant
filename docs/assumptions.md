@@ -2,7 +2,7 @@
 
 The full design is in [ARCHITECTURE.md](ARCHITECTURE.md); this file records the assumptions it rests on.
 
-The brief leaves several points open and invites assumptions. Each is stated here with the reasoning, so it can be challenged or changed without redesigning the system.
+The project specification leaves several points open and invites assumptions. Each is stated here with the reasoning, so it can be challenged or changed without redesigning the system.
 
 ## 1. Dataset facts (verified against `bigquery-public-data.thelook_ecommerce`)
 
@@ -43,7 +43,7 @@ Defense in depth: (1) schema exposed to the LLM omits blocked columns, (2) SQL v
 
 ## 4. Golden Bucket ("Trios")
 
-Marked theoretical in the brief, so this is a **design-only** item: the prototype does not read a golden bucket. The assumed schema is:
+Marked theoretical in the specification, so this is a **design-only** item: the prototype does not read a golden bucket. The assumed schema is:
 
 ```json
 {"id": "...", "question": "...", "sql": "...", "report": "...",
