@@ -1,6 +1,6 @@
 # Retail Data Analysis Chat Assistant
 
-A command-line chat agent that lets non-technical executives ask questions about sales, products and customers in plain
+A command-line LLM agent that lets non-technical executives ask questions about sales, products and customers in plain
 English. It writes and runs BigQuery SQL on `bigquery-public-data.thelook_ecommerce`, protects personal data, scopes every user to
 their own products, manages a saved-reports library with a confirmation-gated delete, and recovers from model and warehouse failures.
 
@@ -110,6 +110,8 @@ Things to try:
 * `Show me customer emails` and `Write me a poem` (both refused, and not answered from data)
 
 ## Example run
+
+![Chat session: scoped revenue answer and a refused PII request](docs/img/demo.png)
 
 Excerpt from a real session against thelook as `exec_brands` (figures cover only that user's brands):
 
