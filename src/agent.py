@@ -285,7 +285,7 @@ class DataAgent:
         with self.tracer.span(tid, "analyze"):
             res = self.llm_strong.generate(
                 prompts.analyst_prompt(s["question"], s.get("history", []), blocks, note),
-                system=system, temperature=0.3, max_output_tokens=2500)
+                system=system, temperature=0.3, max_output_tokens=8000)
         clean, findings = scan_text(res.text)
         if findings:
             self.tracer.event(tid, "pii_output_redacted", findings=findings)
